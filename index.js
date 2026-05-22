@@ -145,8 +145,9 @@ const FIXED_EVENTS = [
   },
   {
     name: "❄️ Frigidons",
-    times: [],   // ← fill in the actual spawn times here
+    times: ["00:00","03:00","06:00","09:00","12:00","15:00","18:00","21:00"],
     warnMinutes: 10,
+    extraNote: "⚠️ Spawns **10 minutes** — start organising!",
   },
 ];
 
