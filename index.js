@@ -31,7 +31,7 @@ const {
 const fs = require("fs");
 
 const TOKEN          = process.env.BOT_TOKEN;
-const CHANNEL_ID     = "1502646350410416128";
+const CHANNEL_ID     = "1507295347225919580";
 const LOG_CHANNEL_ID = "1502646498670674080";
 
 if (!TOKEN) {
