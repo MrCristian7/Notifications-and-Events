@@ -110,6 +110,7 @@ function pickNextAvailableSlot(key) {
   });
   if (stale) return stale;
   // All slots genuinely active — auto-pick the one with the oldest kill time
+  if (!instances.length) return null;
   return instances.reduce((oldest, b) => {
     const eOldest = data.kills[oldest.id];
     const eCurr   = data.kills[b.id];
@@ -1031,10 +1032,20 @@ client.once(Events.ClientReady, async () => {
 
   let channel, logCh;
   try { channel = await client.channels.fetch(CHANNEL_ID); }
-  catch (err) { console.error("[Ready] Could not fetch main channel:", err.message ?? err); return; }
+  catch (err) {
+    console.error(`[Ready] Could not fetch main channel (ID: ${CHANNEL_ID}):`, err.message ?? err);
+    console.error("[Ready] Check that CHANNEL_ID is correct and the bot has access. Retrying in 30s...");
+    setTimeout(() => client.emit(Events.ClientReady, client), 30000);
+    return;
+  }
 
   try { logCh = await client.channels.fetch(LOG_CHANNEL_ID); }
-  catch (err) { console.error("[Ready] Could not fetch log channel:", err.message ?? err); return; }
+  catch (err) {
+    console.error(`[Ready] Could not fetch log channel (ID: ${LOG_CHANNEL_ID}):`, err.message ?? err);
+    console.error("[Ready] Check that LOG_CHANNEL_ID is correct and the bot has access. Retrying in 30s...");
+    setTimeout(() => client.emit(Events.ClientReady, client), 30000);
+    return;
+  }
 
   // Init persistent log message in log channel
   try {
@@ -1104,7 +1115,10 @@ client.on(Events.InteractionCreate, async interaction => {
   // ── BOSS KILL BUTTON ──
   if (interaction.isButton() && interaction.customId.startsWith("mu1_boss_kill_")) {
     const key  = interaction.customId.replace("mu1_boss_kill_", "");
-    const boss = pickNextAvailableSlot(key); // always returns a slot (oldest if all active)
+    const boss = pickNextAvailableSlot(key);
+    if (!boss) {
+      return interaction.reply({ content: `⚠️ Unknown boss key: \`${key}\``, flags: MessageFlags.Ephemeral });
+    }
     snapshot();
     const now         = Date.now();
     const respawnTime = recordKill(boss.id, now, interaction.user.username);
