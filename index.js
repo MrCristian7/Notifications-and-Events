@@ -31,7 +31,7 @@ const {
 const fs = require("fs");
 
 const TOKEN          = process.env.BOT_TOKEN;
-const CHANNEL_ID     = "1508018231401779371";
+const CHANNEL_ID     = "1507303203182481448";
 const LOG_CHANNEL_ID = "1507303243812704406";
 
 if (!TOKEN) {
@@ -310,7 +310,7 @@ async function recoverFromDiscordBackup() {
     const candidates = [...fetched.values()].filter(m =>
       m.author.id === client.user.id &&
       m.attachments.size > 0 &&
-      [...m.attachments.values()].some(a => a.name && a.name.endsWith(".json"))
+      [...m.attachments.values()].some(a => a.name && a.name.startsWith("backup-") && a.name.endsWith(".json"))
     );
 
     if (!candidates.length) { console.warn("[Recovery] No backup messages found."); return false; }
@@ -318,7 +318,7 @@ async function recoverFromDiscordBackup() {
     const best       = candidates.sort((a, b) =>
       (b.editedTimestamp ?? b.createdTimestamp) - (a.editedTimestamp ?? a.createdTimestamp)
     )[0];
-    const attachment = [...best.attachments.values()].find(a => a.name.endsWith(".json"));
+    const attachment = [...best.attachments.values()].find(a => a.name.startsWith("backup-") && a.name.endsWith(".json"));
 
     const response = await fetch(attachment.url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -369,7 +369,7 @@ function buildBackupEmbed(takenAt) {
     return `• **${b.name}**: by ${e.lastKiller} — kill: ${toServerDateTimeStr(e.killTime)} — respawn: ${toServerDateTimeStr(e.respawnTime)}`;
   });
   return new EmbedBuilder()
-    .setTitle("💾 Timer Backup")
+    .setTitle("💾 MU Timer Backup")
     .setColor(0x2b2d31)
     .setDescription(lines.join("\n"))
     .setFooter({ text: `Last updated: ${stamp} (server time)` });
@@ -386,7 +386,7 @@ async function initBackupMessage(backupChannel) {
     const found = [...existing.values()].find(m =>
       m.author.id === client.user.id &&
       m.embeds.length > 0 &&
-      m.embeds[0]?.title === "💾 Timer Backup"
+      m.embeds[0]?.title === "💾 MU Timer Backup"
     );
     if (found) { backupMessage = found; console.log("[Backup] Reusing existing backup message."); return; }
   } catch (err) {
@@ -1096,25 +1096,20 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.reply({ embeds: [buildDashboardEmbed()], flags: MessageFlags.Ephemeral });
   }
 
-  // ── BOSS KILL BUTTON — pick next slot or show picker ──
+  // ── BOSS KILL BUTTON — record now instantly, no modal ──
   if (interaction.isButton() && interaction.customId.startsWith("boss_kill_")) {
     const key  = interaction.customId.replace("boss_kill_", "");
     const boss = pickNextAvailableSlot(key);
 
     if (boss) {
-      // Slot available — show kill time modal directly
-      log(interaction.user, `Opened kill modal for ${boss.name} (auto-picked)`);
-      const modal = new ModalBuilder()
-        .setCustomId(`killtime_${boss.id}`)
-        .setTitle(`Kill Time — ${boss.name}`);
-      modal.addComponents(new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("time")
-          .setLabel("HH:MM (24h, server time) or 'now'")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder("e.g. 21:34 or now")
-      ));
-      return interaction.showModal(modal);
+      snapshot();
+      const now         = Date.now();
+      const respawnTime = recordKill(boss.id, now, interaction.user.username);
+      log(interaction.user, `KILL ${boss.name} — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
+      await announceKill(interaction.channel, interaction.user, `killed **${boss.name}**`,
+        `🕒 Kill: ${toServerDateTimeStr(now)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
+      await maybeRepinAfterAction(interaction.channel);
+      return interaction.deferUpdate();
     }
 
     // All slots occupied — show picker
@@ -1143,38 +1138,16 @@ client.on(Events.InteractionCreate, async interaction => {
     });
   }
 
-  // ── BOSS SLOT PICKER — manual select ──
+  // ── BOSS SLOT PICKER — all slots full, manual pick then record now ──
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith("boss_slot_pick_")) {
-    const id   = interaction.values[0];
-    const boss = BOSSES.find(b => b.id === id);
-    log(interaction.user, `Manually picked slot ${boss.name}`);
-    const modal = new ModalBuilder()
-      .setCustomId(`killtime_${id}`)
-      .setTitle(`Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId("time")
-        .setLabel("HH:MM (24h, server time) or 'now'")
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder("e.g. 21:34 or now")
-    ));
-    return interaction.showModal(modal);
-  }
-
-  // ── KILL TIME MODAL SUBMIT ──
-  if (interaction.isModalSubmit() && interaction.customId.startsWith("killtime_")) {
     snapshot();
-    const id   = interaction.customId.replace("killtime_", "");
-    const boss = BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
-    const now  = Date.now();
-    let killTime;
-    if (raw === "now") { killTime = now; }
-    else { const [h, m] = raw.split(":").map(Number); killTime = parseServerTime(h, m).getTime(); }
-    const respawnTime = recordKill(id, killTime, interaction.user.username);
-    log(interaction.user, `KILL ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
+    const id          = interaction.values[0];
+    const boss        = BOSSES.find(b => b.id === id);
+    const now         = Date.now();
+    const respawnTime = recordKill(id, now, interaction.user.username);
+    log(interaction.user, `KILL ${boss.name} (overwrite) — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
     await announceKill(interaction.channel, interaction.user, `killed **${boss.name}**`,
-      `🕒 Kill: ${toServerDateTimeStr(killTime)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
+      `🕒 Kill: ${toServerDateTimeStr(now)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
     await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
   }
@@ -1204,9 +1177,10 @@ client.on(Events.InteractionCreate, async interaction => {
     modal.addComponents(new ActionRowBuilder().addComponents(
       new TextInputBuilder()
         .setCustomId("time")
-        .setLabel("HH:MM (24h, server time) or 'now'")
+        .setLabel("HH:MM (24h, server time)")
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder("e.g. 21:34 or now")
+        .setPlaceholder("e.g. 21:34 — leave blank for current time")
+        .setRequired(false)
     ));
     return interaction.showModal(modal);
   }
@@ -1216,11 +1190,9 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot();
     const id   = interaction.customId.replace("window_killtime_", "");
     const boss = BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
+    const raw  = interaction.fields.getTextInputValue("time").trim();
     const now  = Date.now();
-    let killTime;
-    if (raw === "now") { killTime = now; }
-    else { const [h, m] = raw.split(":").map(Number); killTime = parseServerTime(h, m).getTime(); }
+    const killTime = raw === "" ? now : parseServerTime(...raw.split(":").map(Number)).getTime();
     const respawnTime = recordKill(id, killTime, interaction.user.username);
     log(interaction.user, `MANUAL SET (window) ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
     await announceKill(interaction.channel, interaction.user, `manually set **${boss.name}** kill time (from window)`,
@@ -1266,11 +1238,28 @@ client.on(Events.InteractionCreate, async interaction => {
     modal.addComponents(new ActionRowBuilder().addComponents(
       new TextInputBuilder()
         .setCustomId("time")
-        .setLabel("HH:MM (24h, server time) or 'now'")
+        .setLabel("HH:MM (24h, server time)")
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder("e.g. 21:34 or now")
+        .setPlaceholder("e.g. 21:34 — leave blank for current time")
+        .setRequired(false)
     ));
     return interaction.showModal(modal);
+  }
+
+  // ── INSERT / OVERWRITE — modal submit (shared by insert and slot-picker flows) ──
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("killtime_")) {
+    snapshot();
+    const id   = interaction.customId.replace("killtime_", "");
+    const boss = BOSSES.find(b => b.id === id);
+    const raw  = interaction.fields.getTextInputValue("time").trim();
+    const now  = Date.now();
+    const killTime    = raw === "" ? now : parseServerTime(...raw.split(":").map(Number)).getTime();
+    const respawnTime = recordKill(id, killTime, interaction.user.username);
+    log(interaction.user, `MANUAL SET ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
+    await announceKill(interaction.channel, interaction.user, `manually set **${boss.name}** kill time`,
+      `🕒 Kill: ${toServerDateTimeStr(killTime)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
+    await maybeRepinAfterAction(interaction.channel);
+    return interaction.deferUpdate();
   }
 
   // ── RESET — picker ──
