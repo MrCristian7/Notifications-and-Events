@@ -553,13 +553,15 @@ async function forwardToLogChannel(content) {
 async function announceKill(channel, user, action, extra = "") {
   const content = `⚔️ **${user.username}** ${action} — ${toServerDateTimeStr(Date.now())} (server time)${extra ? `\n${extra}` : ""}`;
   const msg = await channel.send({ content, flags: MessageFlags.SuppressNotifications });
-  setTimeout(() => { msg.delete().catch(() => {}); forwardToLogChannel(content); }, 5 * 60 * 1000);
+  forwardToLogChannel(content); // forward immediately so restarts don't lose it
+  setTimeout(() => { msg.delete().catch(() => {}); }, 5 * 60 * 1000);
 }
 
 async function announceAdmin(channel, user, action) {
   const content = `📢 **${user.username}** ${action} — ${toServerDateTimeStr(Date.now())} (server time)`;
   const msg     = await channel.send({ content, flags: MessageFlags.SuppressNotifications });
-  setTimeout(() => { msg.delete().catch(() => {}); forwardToLogChannel(content); }, 5 * 60 * 1000);
+  forwardToLogChannel(content); // forward immediately so restarts don't lose it
+  setTimeout(() => { msg.delete().catch(() => {}); }, 5 * 60 * 1000);
 }
 
 // =====================
