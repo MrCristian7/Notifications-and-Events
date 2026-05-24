@@ -81,9 +81,6 @@ const STARTUP_GRACE_MS          = 30 * 1000;
 // =====================
 // BOSSES
 // =====================
-// Each boss type has multiple slots. Clicking the boss button picks the next
-// available slot automatically; if all are occupied a picker menu is shown.
-// =====================
 const BOSS_RESPAWN_MS = 7 * 60 * 60 * 1000;
 const BOSS_WINDOW_MS  = 1 * 60 * 60 * 1000;
 
@@ -101,26 +98,22 @@ function getBossInstances(key) {
   return BOSSES.filter(b => b.key === key);
 }
 
-// Returns the first slot with no kill data, or null if all occupied
 function pickNextAvailableSlot(key) {
   const instances = getBossInstances(key);
   const now = Date.now();
-  // Prefer slots with no kill at all
   const empty = instances.find(b => !data.kills[b.id]);
   if (empty) return empty;
-  // Then prefer slots whose window has fully expired (stale data)
   const stale = instances.find(b => {
     const e = data.kills[b.id];
     if (!e) return false;
     return now > e.respawnTime + BOSS_WINDOW_MS;
   });
   if (stale) return stale;
-  return null; // all slots genuinely occupied
+  return null;
 }
 
 // =====================
 // FIXED EVENTS
-// noEveryone: true  → plain message, no @everyone
 // =====================
 const FIXED_EVENTS = [
   { name: "🟡 Golden Invasion",   times: ["00:31","04:31","08:31","12:31","16:31","20:31"], warnMinutes: 5 },
@@ -644,7 +637,6 @@ function buildDashboardEmbed() {
 
 // =====================
 // RESPAWN SCHEDULE EMBED
-// Longest cooldown at top, soonest at bottom
 // =====================
 function buildRespawnEmbed() {
   const now     = Date.now();
@@ -659,7 +651,6 @@ function buildRespawnEmbed() {
     const windowLeft = windowEnd - now;
     const tsRespawn  = Math.floor(e.respawnTime / 1000);
 
-    // Skip fully expired entries (past window + grace)
     if (cooldown < -10 * 60 * 1000 && windowLeft <= 0) continue;
 
     let statusLine, sortTime;
@@ -681,16 +672,7 @@ function buildRespawnEmbed() {
     });
   }
 
-  // Longest cooldown at top → sort descending by sortTime
   entries.sort((a, b) => b.sortTime - a.sortTime);
-
-  const openWindows = entries.filter(e => {
-    const b  = BOSSES.find(x => x.name === e.line.split("**")[1]);
-    if (!b) return false;
-    const kill = data.kills[b.id];
-    if (!kill) return false;
-    return kill.respawnTime <= now && kill.respawnTime + BOSS_WINDOW_MS > now;
-  }).length;
 
   const description = entries.length
     ? entries.map(e => e.line).join("\n\n")
@@ -707,7 +689,6 @@ function buildRespawnEmbed() {
 // BUTTONS
 // =====================
 function buildButtons() {
-  // One button per boss type (not per slot)
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("boss_kill_kharzul").setLabel("Kharzul").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("boss_kill_vescrya").setLabel("Vescrya").setStyle(ButtonStyle.Primary),
@@ -741,7 +722,11 @@ async function repinDashboard(channel) {
     }).catch(err => { console.error("[Repin] Failed to post dashboard:", err.message ?? err); return null; });
 
     if (!newDashboard) return;
-    if (dashboardMessage) dashboardMessage.delete().catch(() => {});
+
+    // Delete old dashboard AFTER new one is posted to avoid gap
+    if (dashboardMessage) {
+      await dashboardMessage.delete().catch(() => {});
+    }
     dashboardMessage = newDashboard;
 
     // Re-post any active spawn window cards
@@ -766,15 +751,21 @@ async function repinDashboard(channel) {
   } finally { repinInProgress = false; }
 }
 
+// =====================
+// MAYBE REPIN AFTER ACTION
+// Only repins on the 30-min timer — never on individual actions.
+// This prevents duplicate dashboards from appearing after kills.
+// =====================
 async function maybeRepinAfterAction(channel) {
   actionsSinceRepin++;
-  const now            = Date.now();
-  const timerElapsed   = now - lastRepinTime >= REPIN_INTERVAL_MS;
-  const actionsReached = actionsSinceRepin >= REPIN_AFTER_ACTIONS;
-  if ((timerElapsed || actionsReached) && !repinInProgress) {
-    console.log(`[Repin] Triggered (actions=${actionsSinceRepin}, timerElapsed=${timerElapsed})`);
-    await repinDashboard(channel);
-  }
+  if (repinInProgress) return;
+
+  const now = Date.now();
+  const timerElapsed = now - lastRepinTime >= REPIN_INTERVAL_MS;
+  if (!timerElapsed) return; // let the periodic loop handle repositioning
+
+  console.log(`[Repin] 30-min timer elapsed — repinning (actions=${actionsSinceRepin})`);
+  await repinDashboard(channel);
 }
 
 // =====================
@@ -796,7 +787,7 @@ async function createSpawnWindow(boss, id, channel, windowEnd) {
 }
 
 // =====================
-// MISSED WINDOW — free slot, log only
+// MISSED WINDOW
 // =====================
 async function handleMissedWindow(boss, id) {
   const e = data.kills[id];
@@ -947,7 +938,6 @@ async function checkFixedEvents(channel) {
       const eventTimeStr = toServerTimeStr(eventMs);
       const tsEvent      = Math.floor(eventMs / 1000);
 
-      // noEveryone events get no prefix ping
       const prefix = ev.noEveryone ? "" : "@everyone ";
       let msgText =
         `${prefix}⏰ **${ev.name}** starts in **${actualMins} minute${actualMins !== 1 ? "s" : ""}**!\n` +
@@ -1096,7 +1086,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.reply({ embeds: [buildDashboardEmbed()], flags: MessageFlags.Ephemeral });
   }
 
-  // ── BOSS KILL BUTTON — record now instantly, no modal ──
+  // ── BOSS KILL BUTTON ──
   if (interaction.isButton() && interaction.customId.startsWith("boss_kill_")) {
     const key  = interaction.customId.replace("boss_kill_", "");
     const boss = pickNextAvailableSlot(key);
@@ -1138,7 +1128,7 @@ client.on(Events.InteractionCreate, async interaction => {
     });
   }
 
-  // ── BOSS SLOT PICKER — all slots full, manual pick then record now ──
+  // ── BOSS SLOT PICKER ──
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith("boss_slot_pick_")) {
     snapshot();
     const id          = interaction.values[0];
@@ -1246,7 +1236,7 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.showModal(modal);
   }
 
-  // ── INSERT / OVERWRITE — modal submit (shared by insert and slot-picker flows) ──
+  // ── INSERT / OVERWRITE — modal submit ──
   if (interaction.isModalSubmit() && interaction.customId.startsWith("killtime_")) {
     snapshot();
     const id   = interaction.customId.replace("killtime_", "");
