@@ -1050,6 +1050,17 @@ client.once(Events.ClientReady, async () => {
   try { await initBackupMessage(logCh); }
   catch (err) { console.error("[Backup] Could not init:", err.message ?? err); }
 
+  // Delete all stale dashboard messages from this bot before posting a fresh one
+  try {
+    const recent = await channel.messages.fetch({ limit: 100 });
+    const stale  = [...recent.values()].filter(m =>
+      m.author.id === client.user.id &&
+      m.content === "**🔥 MU — Boss Tracker**"
+    );
+    console.log(`[Ready] Found ${stale.length} stale dashboard message(s) — deleting.`);
+    await Promise.all(stale.map(m => m.delete().catch(() => {})));
+  } catch (err) { console.error("[Ready] Could not clean up stale dashboards:", err.message ?? err); }
+
   try {
     dashboardMessage = await channel.send({
       content: "**🔥 MU — Boss Tracker**",
