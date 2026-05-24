@@ -109,7 +109,14 @@ function pickNextAvailableSlot(key) {
     return now > e.respawnTime + BOSS_WINDOW_MS;
   });
   if (stale) return stale;
-  return null;
+  // All slots genuinely active — auto-pick the one with the oldest kill time
+  return instances.reduce((oldest, b) => {
+    const eOldest = data.kills[oldest.id];
+    const eCurr   = data.kills[b.id];
+    if (!eOldest) return b;
+    if (!eCurr)   return oldest;
+    return eCurr.killTime < eOldest.killTime ? b : oldest;
+  });
 }
 
 // =====================
@@ -598,8 +605,8 @@ function buildSpawnWindowEmbed(boss, windowStart, windowEnd) {
 
 function buildSpawnWindowComponents(id) {
   return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("window_kill_"    + id).setLabel("💀 Killed").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("window_settime_" + id).setLabel("⏱️ Set Time").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("mu1_window_kill_"    + id).setLabel("💀 Killed").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("mu1_window_settime_" + id).setLabel("⏱️ Set Time").setStyle(ButtonStyle.Secondary)
   )];
 }
 
@@ -690,17 +697,17 @@ function buildRespawnEmbed() {
 // =====================
 function buildButtons() {
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("boss_kill_kharzul").setLabel("Kharzul").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("boss_kill_vescrya").setLabel("Vescrya").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("boss_kill_muggron").setLabel("Muggron").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("mu1_boss_kill_kharzul").setLabel("Kharzul").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("mu1_boss_kill_vescrya").setLabel("Vescrya").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("mu1_boss_kill_muggron").setLabel("Muggron").setStyle(ButtonStyle.Primary)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("insert_time").setLabel("📝 Insert").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("reset_boss").setLabel("🧹 Reset").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("undo").setLabel("↩️ Undo").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("show_respawn").setLabel("📅 Respawn").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("show_dashboard").setLabel("📊 Dashboard").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("mu1_insert_time").setLabel("📝 Insert").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("mu1_reset_boss").setLabel("🧹 Reset").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("mu1_undo").setLabel("↩️ Undo").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("mu1_show_respawn").setLabel("📅 Respawn").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("mu1_show_dashboard").setLabel("📊 Dashboard").setStyle(ButtonStyle.Secondary)
   );
 
   return [row1, row2];
@@ -1062,73 +1069,32 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── RESPAWN SCHEDULE ──
-  if (interaction.isButton() && interaction.customId === "show_respawn") {
+  if (interaction.isButton() && interaction.customId === "mu1_show_respawn") {
     return interaction.reply({ embeds: [buildRespawnEmbed()], flags: MessageFlags.Ephemeral });
   }
 
   // ── DASHBOARD — ephemeral full view ──
-  if (interaction.isButton() && interaction.customId === "show_dashboard") {
+  if (interaction.isButton() && interaction.customId === "mu1_show_dashboard") {
     return interaction.reply({ embeds: [buildDashboardEmbed()], flags: MessageFlags.Ephemeral });
   }
 
   // ── BOSS KILL BUTTON ──
-  if (interaction.isButton() && interaction.customId.startsWith("boss_kill_")) {
-    const key  = interaction.customId.replace("boss_kill_", "");
-    const boss = pickNextAvailableSlot(key);
-
-    if (boss) {
-      snapshot();
-      const now         = Date.now();
-      const respawnTime = recordKill(boss.id, now, interaction.user.username);
-      log(interaction.user, `KILL ${boss.name} — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
-      await announceKill(interaction.channel, interaction.user, `killed **${boss.name}**`,
-        `🕒 Kill: ${toServerDateTimeStr(now)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
-      return interaction.deferUpdate();
-    }
-
-    // All slots occupied — show picker
-    const instances = getBossInstances(key);
-    const now       = Date.now();
-    log(interaction.user, `All ${key} slots occupied — showing picker`);
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId(`boss_slot_pick_${key}`)
-      .setPlaceholder("All slots busy — pick which to overwrite")
-      .addOptions(instances.map(b => {
-        const e = data.kills[b.id];
-        let status = "🟢 READY";
-        if (e) {
-          const cd         = e.respawnTime - now;
-          const windowLeft = e.respawnTime + BOSS_WINDOW_MS - now;
-          if (cd > 0)          status = `⏳ ${format(cd)}`;
-          else if (windowLeft > 0) status = `🟢 WINDOW ${format(windowLeft)}`;
-          else                 status = `⚠️ expired`;
-        }
-        return { label: `${b.name} — ${status}`, value: b.id };
-      }));
-    return interaction.reply({
-      content: `⚠️ All **${instances[0].label}** slots are active. Pick which one to overwrite:`,
-      components: [new ActionRowBuilder().addComponents(menu)],
-      flags: MessageFlags.Ephemeral
-    });
-  }
-
-  // ── BOSS SLOT PICKER ──
-  if (interaction.isStringSelectMenu() && interaction.customId.startsWith("boss_slot_pick_")) {
+  if (interaction.isButton() && interaction.customId.startsWith("mu1_boss_kill_")) {
+    const key  = interaction.customId.replace("mu1_boss_kill_", "");
+    const boss = pickNextAvailableSlot(key); // always returns a slot (oldest if all active)
     snapshot();
-    const id          = interaction.values[0];
-    const boss        = BOSSES.find(b => b.id === id);
     const now         = Date.now();
-    const respawnTime = recordKill(id, now, interaction.user.username);
-    log(interaction.user, `KILL ${boss.name} (overwrite) — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
+    const respawnTime = recordKill(boss.id, now, interaction.user.username);
+    log(interaction.user, `KILL ${boss.name} — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
     await announceKill(interaction.channel, interaction.user, `killed **${boss.name}**`,
       `🕒 Kill: ${toServerDateTimeStr(now)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
     return interaction.deferUpdate();
   }
 
   // ── WINDOW KILL ──
-  if (interaction.isButton() && interaction.customId.startsWith("window_kill_")) {
+  if (interaction.isButton() && interaction.customId.startsWith("mu1_window_kill_")) {
     snapshot();
-    const id          = interaction.customId.replace("window_kill_", "");
+    const id          = interaction.customId.replace("mu1_window_kill_", "");
     const boss        = BOSSES.find(b => b.id === id);
     const now         = Date.now();
     const respawnTime = recordKill(id, now, interaction.user.username);
@@ -1139,12 +1105,12 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── WINDOW SET TIME — show modal ──
-  if (interaction.isButton() && interaction.customId.startsWith("window_settime_")) {
-    const id   = interaction.customId.replace("window_settime_", "");
+  if (interaction.isButton() && interaction.customId.startsWith("mu1_window_settime_")) {
+    const id   = interaction.customId.replace("mu1_window_settime_", "");
     const boss = BOSSES.find(b => b.id === id);
     log(interaction.user, `Opened set-time modal for ${boss.name} (window)`);
     const modal = new ModalBuilder()
-      .setCustomId(`window_killtime_${id}`)
+      .setCustomId(`mu1_window_killtime_${id}`)
       .setTitle(`Set Kill Time — ${boss.name}`);
     modal.addComponents(new ActionRowBuilder().addComponents(
       new TextInputBuilder()
@@ -1158,9 +1124,9 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── WINDOW SET TIME — modal submit ──
-  if (interaction.isModalSubmit() && interaction.customId.startsWith("window_killtime_")) {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("mu1_window_killtime_")) {
     snapshot();
-    const id   = interaction.customId.replace("window_killtime_", "");
+    const id   = interaction.customId.replace("mu1_window_killtime_", "");
     const boss = BOSSES.find(b => b.id === id);
     const raw  = interaction.fields.getTextInputValue("time").trim();
     const now  = Date.now();
@@ -1173,10 +1139,10 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── INSERT TIME — boss picker ──
-  if (interaction.isButton() && interaction.customId === "insert_time") {
+  if (interaction.isButton() && interaction.customId === "mu1_insert_time") {
     log(interaction.user, `Opened insert: boss selection menu`);
     const menu = new StringSelectMenuBuilder()
-      .setCustomId("select_boss_insert")
+      .setCustomId("mu1_select_boss_insert")
       .setPlaceholder("Select boss slot")
       .addOptions(BOSSES.map(b => {
         const e   = data.kills[b.id];
@@ -1199,12 +1165,12 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── INSERT TIME — modal trigger ──
-  if (interaction.isStringSelectMenu() && interaction.customId === "select_boss_insert") {
+  if (interaction.isStringSelectMenu() && interaction.customId === "mu1_select_boss_insert") {
     const id   = interaction.values[0];
     const boss = BOSSES.find(b => b.id === id);
     log(interaction.user, `Insert: selected ${boss.name}`);
     const modal = new ModalBuilder()
-      .setCustomId(`killtime_${id}`)
+      .setCustomId(`mu1_killtime_${id}`)
       .setTitle(`Insert Kill Time — ${boss.name}`);
     modal.addComponents(new ActionRowBuilder().addComponents(
       new TextInputBuilder()
@@ -1218,9 +1184,9 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── INSERT / OVERWRITE — modal submit ──
-  if (interaction.isModalSubmit() && interaction.customId.startsWith("killtime_")) {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("mu1_killtime_")) {
     snapshot();
-    const id   = interaction.customId.replace("killtime_", "");
+    const id   = interaction.customId.replace("mu1_killtime_", "");
     const boss = BOSSES.find(b => b.id === id);
     const raw  = interaction.fields.getTextInputValue("time").trim();
     const now  = Date.now();
@@ -1233,7 +1199,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── RESET — picker ──
-  if (interaction.isButton() && interaction.customId === "reset_boss") {
+  if (interaction.isButton() && interaction.customId === "mu1_reset_boss") {
     log(interaction.user, `Opened reset menu`);
     const keys = [...new Set(BOSSES.map(b => b.key))];
     const options = [
@@ -1245,7 +1211,7 @@ client.on(Events.InteractionCreate, async interaction => {
       { label: "☠️ DELETE ALL TIMERS", value: "DELETE_ALL" },
     ];
     const menu = new StringSelectMenuBuilder()
-      .setCustomId("reset_select")
+      .setCustomId("mu1_reset_select")
       .setPlaceholder("Select what to reset")
       .addOptions(options);
     return interaction.reply({
@@ -1256,7 +1222,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── RESET — apply ──
-  if (interaction.isStringSelectMenu() && interaction.customId === "reset_select") {
+  if (interaction.isStringSelectMenu() && interaction.customId === "mu1_reset_select") {
     snapshot();
     const value = interaction.values[0];
 
@@ -1299,7 +1265,7 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 
   // ── UNDO ──
-  if (interaction.isButton() && interaction.customId === "undo") {
+  if (interaction.isButton() && interaction.customId === "mu1_undo") {
     if (undo()) {
       log(interaction.user, `UNDO`);
       recalcSpawnWarningsAfterUndo();
