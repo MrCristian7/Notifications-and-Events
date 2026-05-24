@@ -31,7 +31,7 @@ const {
 const fs = require("fs");
 
 const TOKEN          = process.env.BOT_TOKEN;
-const CHANNEL_ID     = "1508018231401779371";
+const CHANNEL_ID     = "1507303203182481448";
 const LOG_CHANNEL_ID = "1507303243812704406";
 
 if (!TOKEN) {
@@ -88,8 +88,8 @@ function buildBosses() {
   const bosses = [];
   for (let i = 1; i <= 3; i++) bosses.push({ id: `lorencia_${i}`, name: `Kharzul #${i}`,         key: "kharzul",  label: "Kharzul"  });
   for (let i = 1; i <= 3; i++) bosses.push({ id: `davias_${i}`,   name: `Vescrya #${i}`,          key: "vescrya",  label: "Vescrya"  });
-  for (let i = 1; i <= 2; i++) bosses.push({ id: `crywolf_${i}`,  name: `Muggron #${i} Crywolf`,  key: "muggron",  label: "Muggron"  });
-  for (let i = 1; i <= 2; i++) bosses.push({ id: `barracks_${i}`, name: `Muggron #${i} Barracks`, key: "muggron",  label: "Muggron"  });
+  for (let i = 1; i <= 2; i++) bosses.push({ id: `crywolf_${i}`,  name: `Muggron #${i} Crywolf`,  key: "muggron_crywolf",  label: "Muggron Crywolf"  });
+  for (let i = 1; i <= 2; i++) bosses.push({ id: `barracks_${i}`, name: `Muggron #${i} Barracks`, key: "muggron_barracks", label: "Muggron Barracks" });
   return bosses;
 }
 const BOSSES = buildBosses();
@@ -699,7 +699,8 @@ function buildButtons() {
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("mu1_boss_kill_kharzul").setLabel("Kharzul").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId("mu1_boss_kill_vescrya").setLabel("Vescrya").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("mu1_boss_kill_muggron").setLabel("Muggron").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("mu1_boss_kill_muggron_crywolf").setLabel("Muggron Crywolf").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("mu1_boss_kill_muggron_barracks").setLabel("Muggron Barracks").setStyle(ButtonStyle.Primary)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
@@ -1020,11 +1021,18 @@ client.once(Events.ClientReady, async () => {
   console.log("Bot online");
   load();
 
+  // Prevent interaction handler from triggering backup reposts during startup
+  lastBackupRepost = Date.now();
+
   if (await recoverFromDiscordBackup()) console.log("[Recovery] Timers restored.");
   restoreSpawnWarningFlags();
 
-  const channel = await client.channels.fetch(CHANNEL_ID);
-  const logCh   = await client.channels.fetch(LOG_CHANNEL_ID);
+  let channel, logCh;
+  try { channel = await client.channels.fetch(CHANNEL_ID); }
+  catch (err) { console.error("[Ready] Could not fetch main channel:", err.message ?? err); return; }
+
+  try { logCh = await client.channels.fetch(LOG_CHANNEL_ID); }
+  catch (err) { console.error("[Ready] Could not fetch log channel:", err.message ?? err); return; }
 
   // Init persistent log message in log channel
   try {
@@ -1042,11 +1050,13 @@ client.once(Events.ClientReady, async () => {
   try { await initBackupMessage(logCh); }
   catch (err) { console.error("[Backup] Could not init:", err.message ?? err); }
 
-  dashboardMessage = await channel.send({
-    content: "**🔥 MU — Boss Tracker**",
-    components: buildButtons(),
-    flags: MessageFlags.SuppressNotifications
-  });
+  try {
+    dashboardMessage = await channel.send({
+      content: "**🔥 MU — Boss Tracker**",
+      components: buildButtons(),
+      flags: MessageFlags.SuppressNotifications
+    });
+  } catch (err) { console.error("[Ready] Could not post dashboard:", err.message ?? err); return; }
 
   lastRepinTime     = Date.now();
   actionsSinceRepin = 0;
