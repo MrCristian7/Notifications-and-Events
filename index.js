@@ -51,7 +51,7 @@ const MAX_UNDO                     = 10;
 const EVERYONE_WARNING_LIFESPAN_MS = 10 * 60 * 1000;
 const WINDOW_GRACE_MS              = 15 * 60 * 1000;
 const REPIN_INTERVAL_MS            = 30 * 60 * 1000;
-const REPIN_AFTER_ACTIONS          = 10;
+
 
 // =====================
 // STATE
@@ -751,22 +751,7 @@ async function repinDashboard(channel) {
   } finally { repinInProgress = false; }
 }
 
-// =====================
-// MAYBE REPIN AFTER ACTION
-// Only repins on the 30-min timer — never on individual actions.
-// This prevents duplicate dashboards from appearing after kills.
-// =====================
-async function maybeRepinAfterAction(channel) {
-  actionsSinceRepin++;
-  if (repinInProgress) return;
 
-  const now = Date.now();
-  const timerElapsed = now - lastRepinTime >= REPIN_INTERVAL_MS;
-  if (!timerElapsed) return; // let the periodic loop handle repositioning
-
-  console.log(`[Repin] 30-min timer elapsed — repinning (actions=${actionsSinceRepin})`);
-  await repinDashboard(channel);
-}
 
 // =====================
 // SPAWN WINDOW CREATION
@@ -1098,7 +1083,6 @@ client.on(Events.InteractionCreate, async interaction => {
       log(interaction.user, `KILL ${boss.name} — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
       await announceKill(interaction.channel, interaction.user, `killed **${boss.name}**`,
         `🕒 Kill: ${toServerDateTimeStr(now)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
-      await maybeRepinAfterAction(interaction.channel);
       return interaction.deferUpdate();
     }
 
@@ -1138,7 +1122,6 @@ client.on(Events.InteractionCreate, async interaction => {
     log(interaction.user, `KILL ${boss.name} (overwrite) — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
     await announceKill(interaction.channel, interaction.user, `killed **${boss.name}**`,
       `🕒 Kill: ${toServerDateTimeStr(now)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
-    await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
   }
 
@@ -1152,7 +1135,6 @@ client.on(Events.InteractionCreate, async interaction => {
     log(interaction.user, `WINDOW KILL ${boss.name} — kill: ${toServerDateTimeStr(now)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
     await announceKill(interaction.channel, interaction.user, `killed **${boss.name}** (window kill)`,
       `🕒 Kill: ${toServerDateTimeStr(now)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
-    await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
   }
 
@@ -1187,7 +1169,6 @@ client.on(Events.InteractionCreate, async interaction => {
     log(interaction.user, `MANUAL SET (window) ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
     await announceKill(interaction.channel, interaction.user, `manually set **${boss.name}** kill time (from window)`,
       `🕒 Kill: ${toServerDateTimeStr(killTime)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
-    await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
   }
 
@@ -1248,7 +1229,6 @@ client.on(Events.InteractionCreate, async interaction => {
     log(interaction.user, `MANUAL SET ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
     await announceKill(interaction.channel, interaction.user, `manually set **${boss.name}** kill time`,
       `🕒 Kill: ${toServerDateTimeStr(killTime)} — 🔄 Respawn: ${toServerDateTimeStr(respawnTime)}`);
-    await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
   }
 
@@ -1289,7 +1269,6 @@ client.on(Events.InteractionCreate, async interaction => {
       save();
       log(interaction.user, `RESET ALL TIMERS`);
       await announceAdmin(interaction.channel, interaction.user, "reset **ALL** timers ☠️");
-      await maybeRepinAfterAction(interaction.channel);
       return interaction.deferUpdate();
     }
 
@@ -1305,7 +1284,6 @@ client.on(Events.InteractionCreate, async interaction => {
       const label = targets[0]?.label ?? key;
       log(interaction.user, `RESET ALL ${label}`);
       await announceAdmin(interaction.channel, interaction.user, `reset all **${label}** timers`);
-      await maybeRepinAfterAction(interaction.channel);
       return interaction.deferUpdate();
     }
 
@@ -1317,7 +1295,6 @@ client.on(Events.InteractionCreate, async interaction => {
     save();
     log(interaction.user, `RESET timer for ${boss.name}`);
     await announceAdmin(interaction.channel, interaction.user, `reset timer for **${boss.name}**`);
-    await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
   }
 
@@ -1327,7 +1304,6 @@ client.on(Events.InteractionCreate, async interaction => {
       log(interaction.user, `UNDO`);
       recalcSpawnWarningsAfterUndo();
       await announceAdmin(interaction.channel, interaction.user, "used **undo**");
-      await maybeRepinAfterAction(interaction.channel);
     }
     return interaction.deferUpdate();
   }
