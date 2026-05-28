@@ -81,15 +81,16 @@ const STARTUP_GRACE_MS          = 30 * 1000;
 // =====================
 // BOSSES
 // =====================
-const BOSS_RESPAWN_MS = 7 * 60 * 60 * 1000;
-const BOSS_WINDOW_MS  = 1 * 60 * 60 * 1000;
+const BOSS_RESPAWN_MS        = 7 * 60 * 60 * 1000;
+const BOSS_WINDOW_MS         = 1 * 60 * 60 * 1000;
+const MUGGRON_RESPAWN_MS     = 3 * 60 * 60 * 1000;
 
 function buildBosses() {
   const bosses = [];
-  for (let i = 1; i <= 3; i++) bosses.push({ id: `lorencia_${i}`, name: `Kharzul #${i}`,         key: "kharzul",  label: "Kharzul"  });
-  for (let i = 1; i <= 3; i++) bosses.push({ id: `davias_${i}`,   name: `Vescrya #${i}`,          key: "vescrya",  label: "Vescrya"  });
-  for (let i = 1; i <= 2; i++) bosses.push({ id: `crywolf_${i}`,  name: `Muggron #${i} Crywolf`,  key: "muggron_crywolf",  label: "Muggron Crywolf"  });
-  for (let i = 1; i <= 2; i++) bosses.push({ id: `barracks_${i}`, name: `Muggron #${i} Barracks`, key: "muggron_barracks", label: "Muggron Barracks" });
+  for (let i = 1; i <= 3; i++) bosses.push({ id: `lorencia_${i}`, name: `Kharzul #${i}`,         key: "kharzul",          label: "Kharzul",          respawnMs: BOSS_RESPAWN_MS    });
+  for (let i = 1; i <= 3; i++) bosses.push({ id: `davias_${i}`,   name: `Vescrya #${i}`,          key: "vescrya",          label: "Vescrya",          respawnMs: BOSS_RESPAWN_MS    });
+  for (let i = 1; i <= 2; i++) bosses.push({ id: `crywolf_${i}`,  name: `Muggron #${i} Crywolf`,  key: "muggron_crywolf",  label: "Muggron Crywolf",  respawnMs: MUGGRON_RESPAWN_MS });
+  for (let i = 1; i <= 2; i++) bosses.push({ id: `barracks_${i}`, name: `Muggron #${i} Barracks`, key: "muggron_barracks", label: "Muggron Barracks", respawnMs: MUGGRON_RESPAWN_MS });
   return bosses;
 }
 const BOSSES = buildBosses();
@@ -169,6 +170,12 @@ const FIXED_EVENTS = [
     times: ["00:00","03:00","06:00","09:00","12:00","15:00","18:00","21:00"],
     warnMinutes: 10,
     extraNote: "⚠️ Spawns **10 minutes** — start organising!",
+  },
+  {
+    name: "🏛️ Colossus Invasion",
+    times: ["13:00","17:00","21:00"],
+    warnMinutes: 10,
+    extraNote: "🎁 Drop: Jewel of Guardian",
   },
 ];
 
@@ -554,14 +561,14 @@ async function forwardToLogChannel(content) {
 async function announceKill(channel, user, action, extra = "") {
   const content = `⚔️ **${user.username}** ${action} — ${toServerDateTimeStr(Date.now())} (server time)${extra ? `\n${extra}` : ""}`;
   const msg = await channel.send({ content, flags: MessageFlags.SuppressNotifications });
-  forwardToLogChannel(content); // forward immediately so restarts don't lose it
+  forwardToLogChannel(content);
   setTimeout(() => { msg.delete().catch(() => {}); }, 5 * 60 * 1000);
 }
 
 async function announceAdmin(channel, user, action) {
   const content = `📢 **${user.username}** ${action} — ${toServerDateTimeStr(Date.now())} (server time)`;
   const msg     = await channel.send({ content, flags: MessageFlags.SuppressNotifications });
-  forwardToLogChannel(content); // forward immediately so restarts don't lose it
+  forwardToLogChannel(content);
   setTimeout(() => { msg.delete().catch(() => {}); }, 5 * 60 * 1000);
 }
 
@@ -734,13 +741,11 @@ async function repinDashboard(channel) {
 
     if (!newDashboard) return;
 
-    // Delete old dashboard AFTER new one is posted to avoid gap
     if (dashboardMessage) {
       await dashboardMessage.delete().catch(() => {});
     }
     dashboardMessage = newDashboard;
 
-    // Re-post any active spawn window cards
     for (const id of Object.keys(spawnWindowMessages)) {
       const w = spawnWindowMessages[id];
       if (w.msg) w.msg.delete().catch(() => {});
@@ -761,8 +766,6 @@ async function repinDashboard(channel) {
     console.log("[Repin] Dashboard stack refreshed.");
   } finally { repinInProgress = false; }
 }
-
-
 
 // =====================
 // SPAWN WINDOW CREATION
@@ -826,7 +829,6 @@ function startLoop() {
         return;
       }
 
-      // Dashboard is buttons-only — just refresh components
       try {
         await dashboardMessage.edit({ components: buildButtons() });
       } catch (err) {
@@ -843,7 +845,6 @@ function startLoop() {
         return;
       }
 
-      // Update spawn window cards
       for (const [id, w] of Object.entries(spawnWindowMessages)) {
         if (!w.msg) continue;
         try {
@@ -882,28 +883,24 @@ function checkWarnings(channel) {
 
     const w = spawnWarnings[b.id];
 
-    // 5-min warning
     if (cooldown > 0 && cooldown <= 5 * 60 * 1000 && !w.warned5) {
       w.warned5 = true;
       postEveryoneWarning(channel, `${b.id}_5min`,
         `@everyone ⏳ **${b.name}** spawns in 5 minutes`, Math.max(cooldown, 0));
     }
 
-    // Window opens
     if (cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
       w.windowCreated = true;
       clearEveryoneWarning(`${b.id}_5min`);
       createSpawnWindow(b, b.id, channel, windowEnd);
     }
 
-    // 20-min window closing warning
     if (cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
       w.warned20 = true;
       postEveryoneWarning(channel, `${b.id}_20min`,
         `@everyone ⚠️ **${b.name}** spawn window closes in 20 minutes!`);
     }
 
-    // Missed window — 10 min grace after window closes → free slot, log only
     if (timeSinceWindowExpired >= 10 * 60 * 1000 && !w.missedHandled) {
       w.missedHandled = true;
       handleMissedWindow(b, b.id);
@@ -1009,7 +1006,9 @@ function clearBossCards(id) {
 // KILL RECORD HELPER
 // =====================
 function recordKill(id, killTime, username) {
-  const respawnTime = killTime + BOSS_RESPAWN_MS;
+  const boss        = BOSSES.find(b => b.id === id);
+  const respawnMs   = boss ? boss.respawnMs : BOSS_RESPAWN_MS;
+  const respawnTime = killTime + respawnMs;
   data.kills[id]    = { killTime, respawnTime, lastKiller: username };
   save();
   spawnWarnings[id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
@@ -1024,7 +1023,6 @@ client.once(Events.ClientReady, async () => {
   console.log("Bot online");
   load();
 
-  // Prevent interaction handler from triggering backup reposts during startup
   lastBackupRepost = Date.now();
 
   if (await recoverFromDiscordBackup()) console.log("[Recovery] Timers restored.");
@@ -1047,7 +1045,6 @@ client.once(Events.ClientReady, async () => {
     return;
   }
 
-  // Init persistent log message in log channel
   try {
     const existing = await logCh.messages.fetch({ limit: 50 });
     const found    = [...existing.values()].find(m =>
@@ -1063,7 +1060,6 @@ client.once(Events.ClientReady, async () => {
   try { await initBackupMessage(logCh); }
   catch (err) { console.error("[Backup] Could not init:", err.message ?? err); }
 
-  // Delete all stale dashboard messages from this bot before posting a fresh one
   try {
     const recent = await channel.messages.fetch({ limit: 100 });
     const stale  = [...recent.values()].filter(m =>
@@ -1102,17 +1098,14 @@ client.on(Events.InteractionCreate, async interaction => {
     repostBackupToBottom();
   }
 
-  // ── RESPAWN SCHEDULE ──
   if (interaction.isButton() && interaction.customId === "mu1_show_respawn") {
     return interaction.reply({ embeds: [buildRespawnEmbed()], flags: MessageFlags.Ephemeral });
   }
 
-  // ── DASHBOARD — ephemeral full view ──
   if (interaction.isButton() && interaction.customId === "mu1_show_dashboard") {
     return interaction.reply({ embeds: [buildDashboardEmbed()], flags: MessageFlags.Ephemeral });
   }
 
-  // ── BOSS KILL BUTTON ──
   if (interaction.isButton() && interaction.customId.startsWith("mu1_boss_kill_")) {
     const key  = interaction.customId.replace("mu1_boss_kill_", "");
     const boss = pickNextAvailableSlot(key);
@@ -1128,7 +1121,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.deferUpdate();
   }
 
-  // ── WINDOW KILL ──
   if (interaction.isButton() && interaction.customId.startsWith("mu1_window_kill_")) {
     snapshot();
     const id          = interaction.customId.replace("mu1_window_kill_", "");
@@ -1141,7 +1133,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.deferUpdate();
   }
 
-  // ── WINDOW SET TIME — show modal ──
   if (interaction.isButton() && interaction.customId.startsWith("mu1_window_settime_")) {
     const id   = interaction.customId.replace("mu1_window_settime_", "");
     const boss = BOSSES.find(b => b.id === id);
@@ -1160,7 +1151,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.showModal(modal);
   }
 
-  // ── WINDOW SET TIME — modal submit ──
   if (interaction.isModalSubmit() && interaction.customId.startsWith("mu1_window_killtime_")) {
     snapshot();
     const id   = interaction.customId.replace("mu1_window_killtime_", "");
@@ -1175,7 +1165,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.deferUpdate();
   }
 
-  // ── INSERT TIME — boss picker ──
   if (interaction.isButton() && interaction.customId === "mu1_insert_time") {
     log(interaction.user, `Opened insert: boss selection menu`);
     const menu = new StringSelectMenuBuilder()
@@ -1201,7 +1190,6 @@ client.on(Events.InteractionCreate, async interaction => {
     });
   }
 
-  // ── INSERT TIME — modal trigger ──
   if (interaction.isStringSelectMenu() && interaction.customId === "mu1_select_boss_insert") {
     const id   = interaction.values[0];
     const boss = BOSSES.find(b => b.id === id);
@@ -1220,7 +1208,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.showModal(modal);
   }
 
-  // ── INSERT / OVERWRITE — modal submit ──
   if (interaction.isModalSubmit() && interaction.customId.startsWith("mu1_killtime_")) {
     snapshot();
     const id   = interaction.customId.replace("mu1_killtime_", "");
@@ -1235,7 +1222,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.deferUpdate();
   }
 
-  // ── RESET — picker ──
   if (interaction.isButton() && interaction.customId === "mu1_reset_boss") {
     log(interaction.user, `Opened reset menu`);
     const keys = [...new Set(BOSSES.map(b => b.key))];
@@ -1258,7 +1244,6 @@ client.on(Events.InteractionCreate, async interaction => {
     });
   }
 
-  // ── RESET — apply ──
   if (interaction.isStringSelectMenu() && interaction.customId === "mu1_reset_select") {
     snapshot();
     const value = interaction.values[0];
@@ -1290,7 +1275,6 @@ client.on(Events.InteractionCreate, async interaction => {
       return interaction.deferUpdate();
     }
 
-    // Single slot reset
     const boss = BOSSES.find(b => b.id === value);
     clearBossCards(value);
     delete data.kills[value];
@@ -1301,7 +1285,6 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.deferUpdate();
   }
 
-  // ── UNDO ──
   if (interaction.isButton() && interaction.customId === "mu1_undo") {
     if (undo()) {
       log(interaction.user, `UNDO`);
