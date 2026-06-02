@@ -547,7 +547,7 @@ function recalcSpawnWarningsAfterUndo() {
 // ANNOUNCE HELPERS
 // =====================
 function stripPings(content) {
-  return content.replace(/@everyone/g, "everyone").replace(/@here/g, "here");
+  return content.replace(/@here/g, "here").replace(/@everyone/g, "everyone");
 }
 
 async function forwardToLogChannel(content) {
@@ -573,7 +573,7 @@ async function announceAdmin(channel, user, action) {
 }
 
 // =====================
-// @EVERYONE WARNINGS
+// @HERE WARNINGS
 // =====================
 async function postEveryoneWarning(channel, key, content, lifespanMs = EVERYONE_WARNING_LIFESPAN_MS) {
   await clearEveryoneWarning(key);
@@ -886,7 +886,7 @@ function checkWarnings(channel) {
     if (cooldown > 0 && cooldown <= 5 * 60 * 1000 && !w.warned5) {
       w.warned5 = true;
       postEveryoneWarning(channel, `${b.id}_5min`,
-        `@everyone ⏳ **${b.name}** spawns in 5 minutes`, Math.max(cooldown, 0));
+        `@here ⏳ **${b.name}** spawns in 5 minutes`, Math.max(cooldown, 0));
     }
 
     if (cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
@@ -898,7 +898,7 @@ function checkWarnings(channel) {
     if (cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
       w.warned20 = true;
       postEveryoneWarning(channel, `${b.id}_20min`,
-        `@everyone ⚠️ **${b.name}** spawn window closes in 20 minutes!`);
+        `@here ⚠️ **${b.name}** spawn window closes in 20 minutes!`);
     }
 
     if (timeSinceWindowExpired >= 10 * 60 * 1000 && !w.missedHandled) {
@@ -931,7 +931,7 @@ async function checkFixedEvents(channel) {
       const eventTimeStr = toServerTimeStr(eventMs);
       const tsEvent      = Math.floor(eventMs / 1000);
 
-      const prefix = ev.noEveryone ? "" : "@everyone ";
+      const prefix = ev.noEveryone ? "" : "@here ";
       let msgText =
         `${prefix}⏰ **${ev.name}** starts in **${actualMins} minute${actualMins !== 1 ? "s" : ""}**!\n` +
         `🕒 ${eventTimeStr} (server time) — <t:${tsEvent}:t> (your local time)`;
@@ -970,7 +970,7 @@ function scheduleDailyReminder() {
         : await client.channels.fetch(CHANNEL_ID).catch(() => null);
       if (!channel) return;
 
-      const content = `@everyone 🌙 Did you finish your dailies? Dungeons? Did you drink your milk? Now's the time to do so.`;
+      const content = `@here 🌙 Did you finish your dailies? Dungeons? Did you drink your milk? Now's the time to do so.`;
       const msg = await channel.send({ content }).catch(err => {
         console.error("[DailyReminder] Failed:", err.message ?? err); return null;
       });
