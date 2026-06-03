@@ -28,7 +28,16 @@ const {
   TextInputStyle
 } = require("discord.js");
 
-const fs = require("fs");
+const fs   = require("fs");
+const path = require("path");
+
+const DATA_DIR  = process.env.DATA_DIR || "/app/data";
+const DATA_FILE = `${DATA_DIR}/sa_data.json`;
+const BACKUP_DIR = `${DATA_DIR}/sa_backups`;
+
+// Ensure persistent storage directories exist
+if (!fs.existsSync(DATA_DIR))   fs.mkdirSync(DATA_DIR,   { recursive: true });
+if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
 const TOKEN          = process.env.BOT_TOKEN;
 const CHANNEL_ID     = "1508018231401779371";
@@ -242,15 +251,15 @@ function nextOccurrenceMs(hhmm, afterMs) {
 // SAVE / LOAD
 // =====================
 function load() {
-  if (fs.existsSync("data.json")) {
-    data = JSON.parse(fs.readFileSync("data.json", "utf8"));
+  if (fs.existsSync(DATA_FILE)) {
+    data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   }
   if (!data.kills) data.kills = {};
 }
 
 function save() {
-  fs.writeFileSync("data.json.tmp", JSON.stringify(data, null, 2));
-  fs.renameSync("data.json.tmp", "data.json");
+  fs.writeFileSync(DATA_FILE + ".tmp", JSON.stringify(data, null, 2));
+  fs.renameSync(DATA_FILE + ".tmp", DATA_FILE);
 }
 
 // =====================
@@ -298,10 +307,10 @@ function restoreSpawnWarningFlags() {
 async function recoverFromDiscordBackup() {
   const now = Date.now();
   const localEmpty =
-    !fs.existsSync("data.json") ||
+    !fs.existsSync(DATA_FILE) ||
     (() => {
       try {
-        const d = JSON.parse(fs.readFileSync("data.json", "utf8"));
+        const d = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
         return !d.kills || Object.values(d.kills).every(e => e.respawnTime < now - 2 * 60 * 60 * 1000);
       } catch { return true; }
     })();
@@ -355,14 +364,13 @@ const BACKUP_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_LOCAL_BACKUPS  = 48;
 
 function saveLocalBackup() {
-  if (!fs.existsSync("backups")) fs.mkdirSync("backups");
   const stamp    = new Date().toISOString().replace(/:/g, "-").replace("T", "_").slice(0, 16);
-  const filename = `backups/data.backup-${stamp}.json`;
+  const filename = path.join(BACKUP_DIR, `data.backup-${stamp}.json`);
   fs.writeFileSync(filename, JSON.stringify(data, null, 2));
-  const files = fs.readdirSync("backups")
+  const files = fs.readdirSync(BACKUP_DIR)
     .filter(f => f.startsWith("data.backup-") && f.endsWith(".json")).sort();
   if (files.length > MAX_LOCAL_BACKUPS)
-    files.slice(0, files.length - MAX_LOCAL_BACKUPS).forEach(f => fs.unlinkSync(`backups/${f}`));
+    files.slice(0, files.length - MAX_LOCAL_BACKUPS).forEach(f => fs.unlinkSync(path.join(BACKUP_DIR, f)));
   return filename;
 }
 
